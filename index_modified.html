@@ -1,0 +1,613 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Speaking Lab - Role-Play Generator</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- React & Babel -->
+  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Playfair+Display:ital,wght@0,600;1,600&display=swap');
+    
+    body {
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      background-color: #080d14;
+      color: #f3f4f6;
+    }
+    .serif-title {
+      font-family: 'Playfair Display', serif;
+    }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col items-center justify-center p-4 sm:p-8">
+
+  <div id="root" class="w-full max-w-4xl"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef } = React;
+
+    // Temas/Situaciones dinámicas clasificadas por nivel
+    const SITUATIONS_BY_LEVEL = {
+      'A1': [
+        { id: 'a1_intro', name: 'Self Introduction', icon: 'user' },
+        { id: 'a1_food', name: 'Ordering Food', icon: 'utensils' },
+        { id: 'a1_directions', name: 'Asking Directions', icon: 'map-pin' },
+        { id: 'a1_shopping', name: 'Basic Shopping', icon: 'shopping-bag' },
+        { id: 'custom', name: 'Custom Situation', icon: 'pencil' },
+      ],
+      'A2': [
+        { id: 'a2_hotel', name: 'Hotel Check-in', icon: 'bed' },
+        { id: 'a2_hobbies', name: 'Talking about Hobbies', icon: 'smile' },
+        { id: 'a2_doctor', name: 'At the Doctor', icon: 'stethoscope' },
+        { id: 'a2_weekend', name: 'Weekend Plans', icon: 'calendar' },
+        { id: 'custom', name: 'Custom Situation', icon: 'pencil' },
+      ],
+      'B1': [
+        { id: 'b1_interview', name: 'Job Interview', icon: 'briefcase' },
+        { id: 'b1_travel', name: 'Planning a Trip', icon: 'plane' },
+        { id: 'b1_apartment', name: 'Renting an Apartment', icon: 'home' },
+        { id: 'b1_complaint', name: 'Store Complaint', icon: 'message-square-warning' },
+        { id: 'custom', name: 'Custom Situation', icon: 'pencil' },
+      ],
+      'B1+': [
+        { id: 'b1p_customer', name: 'Customer Service Dispute', icon: 'headphones' },
+        { id: 'b1p_debate', name: 'Eco Debate', icon: 'globe' },
+        { id: 'b1p_negotiation', name: 'Price Negotiation', icon: 'dollar-sign' },
+        { id: 'b1p_ambition', name: 'Career Goals', icon: 'trending-up' },
+        { id: 'custom', name: 'Custom Situation', icon: 'pencil' },
+      ],
+      'B2': [
+        { id: 'b2_workplace', name: 'Workplace Crisis', icon: 'building' },
+        { id: 'b2_pitch', name: 'Project Pitch', icon: 'presentation' },
+        { id: 'b2_tech', name: 'AI & Future Tech', icon: 'cpu' },
+        { id: 'b2_culture', name: 'Cultural Expressions', icon: 'languages' },
+        { id: 'custom', name: 'Custom Situation', icon: 'pencil' },
+      ]
+    };
+
+    const LEVELS = ['A1', 'A2', 'B1', 'B1+', 'B2'];
+    const DIFFICULTIES = ['Easy', 'Medium', 'Hard'];
+    const DURATIONS = [2, 3, 4, 5]; // Duración en minutos
+
+    function App() {
+      const [level, setLevel] = useState('A2');
+      const [situation, setSituation] = useState(SITUATIONS_BY_LEVEL['A2'][0].id);
+      const [customSituation, setCustomSituation] = useState('');
+      const [difficulty, setDifficulty] = useState('Medium');
+      const [duration, setDuration] = useState(3); // Por defecto 3 min
+      
+      // Estado de flujo de la app
+      const [isStarted, setIsStarted] = useState(false);
+      const [isFinished, setIsFinished] = useState(false);
+      const [timeLeft, setTimeLeft] = useState(0);
+
+      // Conversación y voz
+      const [messages, setMessages] = useState([]);
+      const [isListening, setIsListening] = useState(false);
+      const [transcript, setTranscript] = useState('');
+      const [isSpeaking, setIsSpeaking] = useState(false);
+      const [feedback, setFeedback] = useState(null);
+
+      const recognitionRef = useRef(null);
+      const silenceTimerRef = useRef(null);
+      const transcriptRef = useRef('');
+      const isListeningRef = useRef(false);
+      const processingSpeechRef = useRef(false);
+      const manuallyStoppedRef = useRef(false);
+
+      // Cambiar de nivel actualiza automáticamente los temas disponibles
+      const handleLevelChange = (selectedLevel) => {
+        setLevel(selectedLevel);
+        const newSituations = SITUATIONS_BY_LEVEL[selectedLevel];
+        setSituation(newSituations[0].id);
+      };
+
+      // Inicializar iconos Lucide
+      useEffect(() => {
+        if (window.lucide) {
+          window.lucide.createIcons();
+        }
+      }, [isStarted, level, situation, isFinished]);
+
+      // Configurar Reconocimiento de Voz (STT)
+      useEffect(() => {
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (SpeechRecognition) {
+          const rec = new SpeechRecognition();
+
+          // English-only speech recognition.
+          rec.continuous = true;
+          rec.interimResults = true;
+          rec.lang = 'en-US';
+
+          rec.onresult = (e) => {
+            let fullTranscript = '';
+
+            for (let i = 0; i < e.results.length; i++) {
+              fullTranscript += e.results[i][0].transcript;
+            }
+
+            transcriptRef.current = fullTranscript.trim();
+            setTranscript(transcriptRef.current);
+
+            // Reset the 2-second silence countdown after every speech result.
+            clearTimeout(silenceTimerRef.current);
+            if (isListeningRef.current && transcriptRef.current) {
+              silenceTimerRef.current = setTimeout(() => {
+                manuallyStoppedRef.current = false;
+                if (recognitionRef.current && isListeningRef.current) {
+                  recognitionRef.current.stop();
+                }
+              }, 2000);
+            }
+          };
+
+          rec.onerror = (e) => {
+            if (e.error !== 'aborted' && e.error !== 'no-speech') {
+              console.warn('Speech recognition error:', e.error);
+            }
+          };
+
+          rec.onend = () => {
+            clearTimeout(silenceTimerRef.current);
+            isListeningRef.current = false;
+            setIsListening(false);
+
+            // Automatically submit the utterance after 2 seconds of silence.
+            if (!processingSpeechRef.current && !manuallyStoppedRef.current) {
+              const finalText = transcriptRef.current.trim();
+
+              if (finalText) {
+                processingSpeechRef.current = true;
+                handleUserSpeech(finalText);
+                transcriptRef.current = '';
+                setTranscript('');
+
+                setTimeout(() => {
+                  processingSpeechRef.current = false;
+                }, 50);
+              }
+            }
+          };
+
+          recognitionRef.current = rec;
+        }
+
+        return () => {
+          clearTimeout(silenceTimerRef.current);
+          if (recognitionRef.current) {
+            try { recognitionRef.current.abort(); } catch (e) {}
+          }
+        };
+      }, []);
+
+      // Temporizador de sesión
+      useEffect(() => {
+        let timer;
+        if (isStarted && !isFinished && timeLeft > 0) {
+          timer = setInterval(() => {
+            setTimeLeft(prev => {
+              if (prev <= 1) {
+                clearInterval(timer);
+                handleFinishPractice();
+                return 0;
+              }
+              return prev - 1;
+            });
+          }, 1000);
+        }
+        return () => clearInterval(timer);
+      }, [isStarted, isFinished, timeLeft]);
+
+      // Función de síntesis de voz (TTS en Inglés)
+      const speakText = (text) => {
+        if ('speechSynthesis' in window) {
+          window.speechSynthesis.cancel();
+          const utterance = new SpeechSynthesisUtterance(text);
+          // AI voice is always English.
+          utterance.lang = 'en-US';
+          utterance.rate = level === 'A1' || level === 'A2' ? 0.85 : 1.0;
+          
+          utterance.onstart = () => setIsSpeaking(true);
+          utterance.onend = () => setIsSpeaking(false);
+          
+          window.speechSynthesis.speak(utterance);
+        }
+      };
+
+      // Iniciar Sesión de Práctica
+      const handleStart = () => {
+        setIsStarted(true);
+        setIsFinished(false);
+        setTimeLeft(duration * 60);
+
+        const currentSituations = SITUATIONS_BY_LEVEL[level];
+        const currentSitObj = currentSituations.find(s => s.id === situation);
+        const sitName = situation === 'custom' ? customSituation : currentSitObj?.name;
+        
+        // Saludo del asistente en inglés desde el primer momento
+        const initialAiGreeting = `Hello! Welcome to your ${level} level practice for the ${sitName} scenario. I am your English partner today. How can I help you to get started?`;
+        
+        const firstMsg = { sender: 'ai', text: initialAiGreeting };
+        setMessages([firstMsg]);
+        speakText(initialAiGreeting);
+      };
+
+      // Alternar Micrófono
+      const toggleListening = () => {
+        if (!recognitionRef.current) {
+          alert('Your browser does not support speech recognition. Try Google Chrome or Microsoft Edge.');
+          return;
+        }
+
+        if (isListeningRef.current) {
+          manuallyStoppedRef.current = true;
+          clearTimeout(silenceTimerRef.current);
+          recognitionRef.current.stop();
+          return;
+        }
+
+        clearTimeout(silenceTimerRef.current);
+        transcriptRef.current = '';
+        setTranscript('');
+        manuallyStoppedRef.current = false;
+        processingSpeechRef.current = false;
+
+        try {
+          recognitionRef.current.start();
+          isListeningRef.current = true;
+          setIsListening(true);
+        } catch (error) {
+          console.warn('Speech recognition could not start:', error);
+          isListeningRef.current = false;
+          setIsListening(false);
+        }
+      };
+
+      // Procesar intervención del usuario
+      const handleUserSpeech = (userText) => {
+        const newMessages = [...messages, { sender: 'user', text: userText }];
+        setMessages(newMessages);
+
+        setTimeout(() => {
+          const currentSituations = SITUATIONS_BY_LEVEL[level];
+          const sitName = situation === 'custom' ? customSituation : currentSituations.find(s => s.id === situation)?.name;
+          
+          const aiResponse = `That sounds interesting! Regarding our ${sitName} situation, what else can you tell me about that?`;
+          setMessages(prev => [...prev, { sender: 'ai', text: aiResponse }]);
+          speakText(aiResponse);
+        }, 1000);
+      };
+
+      // Finalizar Práctica y Calcular Retroalimentación / Score
+      const handleFinishPractice = () => {
+        window.speechSynthesis.cancel();
+        clearTimeout(silenceTimerRef.current);
+        manuallyStoppedRef.current = true;
+
+        if (recognitionRef.current && isListeningRef.current) {
+          recognitionRef.current.stop();
+        }
+
+        // Include any speech that was still being transcribed when End & Score was pressed.
+        const pendingTranscript = transcriptRef.current.trim();
+        const completedUserMessages = messages.filter(m => m.sender === 'user').length;
+        const userMsgCount = completedUserMessages + (pendingTranscript ? 1 : 0);
+
+        if (pendingTranscript) {
+          setMessages(prev => [...prev, { sender: 'user', text: pendingTranscript }]);
+          transcriptRef.current = '';
+          setTranscript('');
+        }
+
+        isListeningRef.current = false;
+        setIsListening(false);
+        setIsFinished(true);
+        
+        // Cálculo del puntaje dinámico /10
+        let baseScore = 6.0;
+        if (userMsgCount >= 5) baseScore += 3.0;
+        else if (userMsgCount >= 3) baseScore += 2.0;
+        else if (userMsgCount >= 1) baseScore += 1.0;
+
+        if (difficulty === 'Hard' && userMsgCount >= 2) baseScore += 1.0;
+        
+        const finalScore = Math.min(10, Math.max(2, baseScore)).toFixed(1);
+
+        setFeedback({
+          score: finalScore,
+          interactions: userMsgCount,
+          fluency: userMsgCount >= 4 
+            ? "Excellent participation! You maintained a steady flow throughout the role-play."
+            : "Good effort! Try to give longer answers and respond more frequently next time.",
+          grammar: level.startsWith('A') 
+            ? "Good use of essential sentence structures aligned with your level."
+            : "Strong command of topic vocabulary. Keep refining complex connectors.",
+          tips: "Focus on adding secondary details (using 'because', 'for example') to extend your spoken turns."
+        });
+      };
+
+      const formatTime = (seconds) => {
+        const mins = Math.floor(seconds / 60);
+        const secs = seconds % 60;
+        return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
+      };
+
+      const currentSituations = SITUATIONS_BY_LEVEL[level];
+
+      return (
+        <div class="bg-[#0b131e] border border-slate-800/80 rounded-2xl p-6 sm:p-10 shadow-2xl">
+          {!isStarted ? (
+            /* PANEL DE CONFIGURACIÓN */
+            <div>
+              {/* Header */}
+              <div class="mb-8">
+                <div class="flex items-center gap-2 mb-3">
+                  <span class="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse"></span>
+                  <span class="text-xs tracking-widest text-red-400 font-semibold uppercase">Speaking Lab</span>
+                </div>
+                <h1 class="text-3xl sm:text-5xl font-semibold text-slate-100 mb-3 serif-title">
+                  Role-Play Generator
+                </h1>
+                <p class="text-slate-400 text-sm sm:text-base leading-relaxed">
+                  Select your level, situation, and duration. You will <strong class="text-slate-200">speak in English</strong> with an AI character in real-time.
+                </p>
+              </div>
+
+              {/* 01 - English Level */}
+              <div class="mb-8">
+                <h2 class="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-4">
+                  01 — English Level
+                </h2>
+                <div class="flex flex-wrap gap-3">
+                  {LEVELS.map(lvl => (
+                    <button
+                      key={lvl}
+                      onClick={() => handleLevelChange(lvl)}
+                      class={`px-6 py-2.5 rounded-full text-sm font-semibold transition-all ${
+                        level === lvl
+                          ? 'bg-[#e5a93c] text-slate-950 font-bold shadow-lg shadow-amber-500/20'
+                          : 'bg-[#131e2b] text-slate-300 hover:bg-[#1c2b3d] border border-slate-800'
+                      }`}
+                    >
+                      {lvl}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* 02 - Situation (Diferentes por nivel) */}
+              <div class="mb-8">
+                <h2 class="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-4 flex items-center justify-between">
+                  <span>02 — Topics for Level {level}</span>
+                </h2>
+                <div class="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                  {currentSituations.map(sit => {
+                    const isSelected = situation === sit.id;
+                    return (
+                      <button
+                        key={sit.id}
+                        onClick={() => setSituation(sit.id)}
+                        class={`flex items-center gap-3 p-3.5 rounded-xl text-left border transition-all ${
+                          isSelected
+                            ? 'border-[#e5a93c] bg-[#1a2636] text-[#e5a93c]'
+                            : 'border-slate-800/80 bg-[#131e2b] text-slate-300 hover:border-slate-700'
+                        }`}
+                      >
+                        <i data-lucide={sit.icon} class={`w-5 h-5 ${isSelected ? 'text-[#e5a93c]' : 'text-amber-500/80'}`}></i>
+                        <span class="text-sm font-medium">{sit.name}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {situation === 'custom' && (
+                  <input
+                    type="text"
+                    placeholder="Describe your custom scenario in English..."
+                    value={customSituation}
+                    onChange={(e) => setCustomSituation(e.target.value)}
+                    class="mt-4 w-full bg-[#131e2b] border border-amber-500/50 rounded-xl p-3 text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-amber-500 text-sm"
+                  />
+                )}
+              </div>
+
+              {/* 03 - Difficulty & Duration */}
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-10">
+                <div>
+                  <h2 class="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-4">
+                    03 — Difficulty
+                  </h2>
+                  <div class="flex gap-2">
+                    {DIFFICULTIES.map(diff => (
+                      <button
+                        key={diff}
+                        onClick={() => setDifficulty(diff)}
+                        class={`flex-1 py-2.5 rounded-xl text-xs font-medium transition-all ${
+                          difficulty === diff
+                            ? 'border border-[#e5a93c] bg-[#1a2636] text-[#e5a93c]'
+                            : 'bg-[#131e2b] text-slate-400 border border-slate-800 hover:text-slate-200'
+                        }`}
+                      >
+                        {diff}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <h2 class="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-4">
+                    04 — Duration (Minutes)
+                  </h2>
+                  <div class="flex gap-2">
+                    {DURATIONS.map(d => (
+                      <button
+                        key={d}
+                        onClick={() => setDuration(d)}
+                        class={`flex-1 py-2.5 rounded-xl text-xs font-bold transition-all ${
+                          duration === d
+                            ? 'border border-[#e5a93c] bg-[#1a2636] text-[#e5a93c]'
+                            : 'bg-[#131e2b] text-slate-400 border border-slate-800 hover:text-slate-200'
+                        }`}
+                      >
+                        {d} min
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Botón de Iniciar */}
+              <button
+                onClick={handleStart}
+                class="w-full py-4 bg-[#e5a93c] hover:bg-[#d4982b] text-slate-950 font-bold text-base rounded-xl transition-all shadow-lg shadow-amber-500/10 flex items-center justify-center gap-2"
+              >
+                <i data-lucide="mic" class="w-5 h-5"></i>
+                Start Speaking Practice
+              </button>
+            </div>
+
+          ) : !isFinished ? (
+
+            /* SALA DE INTERACCIÓN POR VOZ CON CRONÓMETRO */
+            <div>
+              <div class="flex items-center justify-between border-b border-slate-800 pb-4 mb-6">
+                <div>
+                  <span class="text-xs font-semibold text-amber-500 uppercase tracking-widest">{level} • {difficulty}</span>
+                  <h2 class="text-xl font-bold text-slate-100 capitalize">
+                    {situation === 'custom' ? customSituation : currentSituations.find(s => s.id === situation)?.name}
+                  </h2>
+                </div>
+
+                <div class="flex items-center gap-3">
+                  <div class="flex items-center gap-2 bg-[#131e2b] px-3 py-1.5 rounded-lg border border-slate-800 font-mono text-amber-400 font-bold text-sm">
+                    <i data-lucide="clock" class="w-4 h-4"></i>
+                    {formatTime(timeLeft)}
+                  </div>
+                  <button
+                    onClick={handleFinishPractice}
+                    class="text-xs bg-red-500/20 hover:bg-red-500/30 text-red-400 border border-red-500/30 px-3 py-2 rounded-lg transition"
+                  >
+                    End & Score
+                  </button>
+                </div>
+              </div>
+
+              {/* Historial de la Conversación */}
+              <div class="space-y-4 max-h-[320px] overflow-y-auto pr-2 mb-6">
+                {messages.map((m, idx) => (
+                  <div
+                    key={idx}
+                    class={`p-4 rounded-xl max-w-[80%] ${
+                      m.sender === 'user'
+                        ? 'ml-auto bg-amber-500/10 border border-amber-500/30 text-amber-200'
+                        : 'bg-[#131e2b] border border-slate-800 text-slate-200'
+                    }`}
+                  >
+                    <div class="text-[10px] uppercase font-bold text-slate-500 mb-1">
+                      {m.sender === 'user' ? 'You (Speaking)' : 'AI Partner'}
+                    </div>
+                    <p class="text-sm leading-relaxed">{m.text}</p>
+                  </div>
+                ))}
+              </div>
+
+              {/* Panel de Micrófono & Estado */}
+              <div class="flex flex-col items-center justify-center p-6 bg-[#131e2b] rounded-2xl border border-slate-800">
+                <div class="text-xs text-slate-400 mb-4 h-4">
+                  {isListening && <span class="text-amber-400 animate-pulse">Listening to your English voice...</span>}
+                  {isSpeaking && <span class="text-blue-400 animate-pulse">AI is speaking in English...</span>}
+                  {!isListening && !isSpeaking && <span>Click the microphone and speak in English</span>}
+                </div>
+
+                {transcript && (
+                  <div class="text-xs text-slate-300 mb-4 bg-slate-900/60 p-2 rounded italic">
+                    "{transcript}"
+                  </div>
+                )}
+
+                <button
+                  onClick={toggleListening}
+                  class={`w-20 h-20 rounded-full flex items-center justify-center transition-all ${
+                    isListening
+                      ? 'bg-red-500/20 border-2 border-red-500 text-red-500 animate-ping'
+                      : 'bg-[#e5a93c] hover:bg-[#d4982b] text-slate-950 shadow-lg shadow-amber-500/20'
+                  }`}
+                >
+                  <i data-lucide={isListening ? 'square' : 'mic'} class="w-8 h-8"></i>
+                </button>
+              </div>
+            </div>
+
+          ) : (
+
+            /* PANTALLA DE SCORE /10 Y FEEDBACK */
+            <div class="space-y-6">
+              <div class="text-center border-b border-slate-800 pb-6">
+                <span class="text-xs font-semibold text-amber-500 uppercase tracking-widest">Practice Completed</span>
+                <h2 class="text-3xl font-bold text-slate-100 mt-1 serif-title">Performance Report</h2>
+              </div>
+
+              <div class="flex flex-col sm:flex-row items-center justify-center gap-6 bg-[#131e2b] p-6 rounded-2xl border border-slate-800">
+                <div class="text-center">
+                  <div class="text-5xl font-extrabold text-[#e5a93c] font-mono">
+                    {feedback?.score} <span class="text-xl text-slate-500">/10</span>
+                  </div>
+                  <p class="text-xs text-slate-400 mt-1 font-semibold uppercase">Overall Speaking Score</p>
+                </div>
+
+                <div class="h-12 w-px bg-slate-800 hidden sm:block"></div>
+
+                <div class="space-y-1 text-center sm:text-left text-xs text-slate-300">
+                  <p><strong class="text-slate-100">Level Target:</strong> {level} ({difficulty})</p>
+                  <p><strong class="text-slate-100">Total Turns Spoken:</strong> {feedback?.interactions} responses</p>
+                  <p><strong class="text-slate-100">Session Duration:</strong> {duration} minutes</p>
+                </div>
+              </div>
+
+              {/* Secciones de Retroalimentación */}
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div class="bg-[#131e2b] p-4 rounded-xl border border-slate-800">
+                  <div class="flex items-center gap-2 text-amber-400 font-semibold text-sm mb-2">
+                    <i data-lucide="activity" class="w-4 h-4"></i> Fluency & Engagement
+                  </div>
+                  <p class="text-xs text-slate-300 leading-relaxed">{feedback?.fluency}</p>
+                </div>
+
+                <div class="bg-[#131e2b] p-4 rounded-xl border border-slate-800">
+                  <div class="flex items-center gap-2 text-emerald-400 font-semibold text-sm mb-2">
+                    <i data-lucide="check-circle-2" class="w-4 h-4"></i> Grammar & Vocabulary
+                  </div>
+                  <p class="text-xs text-slate-300 leading-relaxed">{feedback?.grammar}</p>
+                </div>
+              </div>
+
+              <div class="bg-[#131e2b] p-4 rounded-xl border border-slate-800">
+                <div class="flex items-center gap-2 text-blue-400 font-semibold text-sm mb-2">
+                  <i data-lucide="lightbulb" class="w-4 h-4"></i> Recommendation for Next Time
+                </div>
+                <p class="text-xs text-slate-300 leading-relaxed">{feedback?.tips}</p>
+              </div>
+
+              <button
+                onClick={() => { setIsStarted(false); setIsFinished(false); }}
+                class="w-full py-4 bg-[#e5a93c] hover:bg-[#d4982b] text-slate-950 font-bold text-sm rounded-xl transition-all shadow-lg shadow-amber-500/10 flex items-center justify-center gap-2"
+              >
+                <i data-lucide="rotate-ccw" class="w-4 h-4"></i> Start New Role-Play Session
+              </button>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
