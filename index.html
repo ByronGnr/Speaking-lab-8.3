@@ -1,1 +1,546 @@
 
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Speaking Lab - Role-Play Generator</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- FontAwesome Icons (Estable y compatible) -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Playfair+Display:ital,wght@0,600;1,600&display=swap');
+    
+    body {
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      background-color: #080d14;
+      color: #f3f4f6;
+    }
+    .serif-title {
+      font-family: 'Playfair Display', serif;
+    }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col items-center justify-center p-4 sm:p-8">
+
+  <div id="app" class="w-full max-w-4xl bg-[#0b131e] border border-slate-800/80 rounded-2xl p-6 sm:p-10 shadow-2xl">
+    <!-- Se renderiza dinámicamente -->
+  </div>
+
+  <script>
+    // Configuración de Temas dinámicos por Nivel
+    const SITUATIONS_BY_LEVEL = {
+      'A1': [
+        { id: 'a1_intro', name: 'Self Introduction', icon: 'fa-user' },
+        { id: 'a1_food', name: 'Ordering Food', icon: 'fa-utensils' },
+        { id: 'a1_directions', name: 'Asking Directions', icon: 'fa-map-pin' },
+        { id: 'a1_shopping', name: 'Basic Shopping', icon: 'fa-bag-shopping' },
+        { id: 'custom', name: 'Custom Situation', icon: 'fa-pen' },
+      ],
+      'A2': [
+        { id: 'a2_hotel', name: 'Hotel Check-in', icon: 'fa-bed' },
+        { id: 'a2_hobbies', name: 'Talking about Hobbies', icon: 'fa-face-smile' },
+        { id: 'a2_doctor', name: 'At the Doctor', icon: 'fa-stethoscope' },
+        { id: 'a2_weekend', name: 'Weekend Plans', icon: 'fa-calendar-days' },
+        { id: 'custom', name: 'Custom Situation', icon: 'fa-pen' },
+      ],
+      'B1': [
+        { id: 'b1_interview', name: 'Job Interview', icon: 'fa-briefcase' },
+        { id: 'b1_travel', name: 'Planning a Trip', icon: 'fa-plane' },
+        { id: 'b1_apartment', name: 'Renting an Apartment', icon: 'fa-house' },
+        { id: 'b1_complaint', name: 'Store Complaint', icon: 'fa-comment-slash' },
+        { id: 'custom', name: 'Custom Situation', icon: 'fa-pen' },
+      ],
+      'B1+': [
+        { id: 'b1p_customer', name: 'Customer Service Dispute', icon: 'fa-headset' },
+        { id: 'b1p_debate', name: 'Eco Debate', icon: 'fa-globe' },
+        { id: 'b1p_negotiation', name: 'Price Negotiation', icon: 'fa-dollar-sign' },
+        { id: 'b1p_ambition', name: 'Career Goals', icon: 'fa-chart-line' },
+        { id: 'custom', name: 'Custom Situation', icon: 'fa-pen' },
+      ],
+      'B2': [
+        { id: 'b2_workplace', name: 'Workplace Crisis', icon: 'fa-building' },
+        { id: 'b2_pitch', name: 'Project Pitch', icon: 'fa-chart-pie' },
+        { id: 'b2_tech', name: 'AI & Future Tech', icon: 'fa-microchip' },
+        { id: 'b2_culture', name: 'Cultural Expressions', icon: 'fa-language' },
+        { id: 'custom', name: 'Custom Situation', icon: 'fa-pen' },
+      ]
+    };
+
+    const LEVELS = ['A1', 'A2', 'B1', 'B1+', 'B2'];
+    const DIFFICULTIES = ['Easy', 'Medium', 'Hard'];
+    const DURATIONS = [2, 3, 4, 5]; // Minutos
+
+    // Estado de la Aplicación
+    let state = {
+      level: 'A2',
+      situationId: SITUATIONS_BY_LEVEL['A2'][0].id,
+      customSituation: '',
+      difficulty: 'Medium',
+      duration: 3,
+      isStarted: false,
+      isFinished: false,
+      timeLeft: 0,
+      timerInterval: null,
+      messages: [],
+      isListening: false,
+      isSpeaking: false,
+      transcript: '',
+      feedback: null
+    };
+
+    // Reconocimiento de Voz
+    let recognition = null;
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+    if (SpeechRecognition) {
+      recognition = new SpeechRecognition();
+      recognition.continuous = false;
+      recognition.interimResults = true;
+      recognition.lang = 'en-US';
+
+      recognition.onresult = (e) => {
+        let currentText = '';
+        for (let i = e.resultIndex; i < e.results.length; ++i) {
+          currentText += e.results[i][0].transcript;
+        }
+        state.transcript = currentText;
+        render();
+      };
+
+      recognition.onend = () => {
+        state.isListening = false;
+        if (state.transcript.trim()) {
+          handleUserSpeech(state.transcript.trim());
+          state.transcript = '';
+        }
+        render();
+      };
+    }
+
+    // Síntesis de Voz (IA Habla en Inglés)
+    function speakText(text) {
+      if ('speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = 'en-US';
+        utterance.rate = (state.level === 'A1' || state.level === 'A2') ? 0.85 : 1.0;
+
+        utterance.onstart = () => { state.isSpeaking = true; render(); };
+        utterance.onend = () => { state.isSpeaking = false; render(); };
+
+        window.speechSynthesis.speak(utterance);
+      }
+    }
+
+    // Control del temporizador
+    function startTimer() {
+      state.timeLeft = state.duration * 60;
+      clearInterval(state.timerInterval);
+      state.timerInterval = setInterval(() => {
+        state.timeLeft--;
+        if (state.timeLeft <= 0) {
+          clearInterval(state.timerInterval);
+          finishPractice();
+        } else {
+          render();
+        }
+      }, 1000);
+    }
+
+    function formatTime(seconds) {
+      const mins = Math.floor(seconds / 60);
+      const secs = seconds % 60;
+      return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
+    }
+
+    // Iniciar Práctica
+    function startPractice() {
+      state.isStarted = true;
+      state.isFinished = false;
+      state.messages = [];
+
+      const currentList = SITUATIONS_BY_LEVEL[state.level];
+      const sitObj = currentList.find(s => s.id === state.situationId);
+      const sitName = state.situationId === 'custom' ? (state.customSituation || 'Custom Practice') : sitObj.name;
+
+      // Mensaje de inicio inmediato en Inglés
+      const greeting = `Hello! Welcome to your ${state.level} level practice for the ${sitName} scenario. I'm your English practice partner. How can I help you today?`;
+      
+      state.messages.push({ sender: 'ai', text: greeting });
+      startTimer();
+      render();
+      speakText(greeting);
+    }
+
+    // Alternar Micrófono
+    function toggleListening() {
+      if (!recognition) {
+        alert('Your browser does not support speech recognition. Please use Google Chrome or Microsoft Edge.');
+        return;
+      }
+
+      if (state.isListening) {
+        recognition.stop();
+      } else {
+        if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+        state.transcript = '';
+        state.isListening = true;
+        recognition.start();
+        render();
+      }
+    }
+
+    // Procesar respuesta de voz del usuario
+    function handleUserSpeech(userText) {
+      state.messages.push({ sender: 'user', text: userText });
+      render();
+
+      setTimeout(() => {
+        const currentList = SITUATIONS_BY_LEVEL[state.level];
+        const sitObj = currentList.find(s => s.id === state.situationId);
+        const sitName = state.situationId === 'custom' ? (state.customSituation || 'Custom Practice') : sitObj.name;
+
+        const aiReply = `That's very clear! Regarding our ${sitName} topic, what else would you like to share about that?`;
+        state.messages.push({ sender: 'ai', text: aiReply });
+        render();
+        speakText(aiReply);
+      }, 800);
+    }
+
+    // Finalizar Práctica y Generar Evaluación /10
+    function finishPractice() {
+      clearInterval(state.timerInterval);
+      if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+      if (recognition && state.isListening) recognition.stop();
+
+      state.isFinished = true;
+      
+      const userTurns = state.messages.filter(m => m.sender === 'user').length;
+      
+      // Cálculo del score dinámico sobre 10
+      let scoreNum = 5.5;
+      if (userTurns >= 5) scoreNum += 3.5;
+      else if (userTurns >= 3) scoreNum += 2.5;
+      else if (userTurns >= 1) scoreNum += 1.5;
+
+      if (state.difficulty === 'Hard' && userTurns >= 2) scoreNum += 1.0;
+      const finalScore = Math.min(10, Math.max(3, scoreNum)).toFixed(1);
+
+      state.feedback = {
+        score: finalScore,
+        userTurns: userTurns,
+        fluency: userTurns >= 4 
+          ? "Excellent fluency! You maintained consistent speaking turns throughout the scenario."
+          : "Good start! Aim for longer responses and more turns to build stronger oral confidence.",
+        grammar: state.level.startsWith('A')
+          ? "Appropriate usage of essential vocabulary and basic sentence frameworks."
+          : "Effective use of complex phrasing suitable for independent intermediate speakers.",
+        recommendation: "Try connecting sentences with transition words like 'however', 'because', or 'for instance' in your next practice."
+      };
+
+      render();
+    }
+
+    // Renderizar Interfaz
+    function render() {
+      const app = document.getElementById('app');
+
+      if (!state.isStarted) {
+        // PANTALLA 1: CONFIGURACIÓN
+        const currentTopics = SITUATIONS_BY_LEVEL[state.level];
+
+        app.innerHTML = `
+          <div>
+            <div class="mb-8">
+              <div class="flex items-center gap-2 mb-3">
+                <span class="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse"></span>
+                <span class="text-xs tracking-widest text-red-400 font-semibold uppercase">Speaking Lab</span>
+              </div>
+              <h1 class="text-3xl sm:text-5xl font-semibold text-slate-100 mb-3 serif-title">
+                Role-Play Generator
+              </h1>
+              <p class="text-slate-400 text-sm sm:text-base leading-relaxed">
+                Select your level, situation, and duration. You will <strong class="text-slate-200">speak in English</strong> with an AI character in real-time.
+              </p>
+            </div>
+
+            <!-- 01 Level -->
+            <div class="mb-8">
+              <h2 class="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-4">
+                01 — English Level
+              </h2>
+              <div class="flex flex-wrap gap-3">
+                ${LEVELS.map(lvl => `
+                  <button 
+                    onclick="changeLevel('${lvl}')" 
+                    class="px-6 py-2.5 rounded-full text-sm font-semibold transition-all ${
+                      state.level === lvl 
+                        ? 'bg-[#e5a93c] text-slate-950 font-bold shadow-lg shadow-amber-500/20' 
+                        : 'bg-[#131e2b] text-slate-300 hover:bg-[#1c2b3d] border border-slate-800'
+                    }"
+                  >
+                    ${lvl}
+                  </button>
+                `).join('')}
+              </div>
+            </div>
+
+            <!-- 02 Topics for current level -->
+            <div class="mb-8">
+              <h2 class="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-4">
+                02 — Topics for Level ${state.level}
+              </h2>
+              <div class="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                ${currentTopics.map(sit => {
+                  const isSel = state.situationId === sit.id;
+                  return `
+                    <button 
+                      onclick="selectSituation('${sit.id}')" 
+                      class="flex items-center gap-3 p-3.5 rounded-xl text-left border transition-all ${
+                        isSel 
+                          ? 'border-[#e5a93c] bg-[#1a2636] text-[#e5a93c]' 
+                          : 'border-slate-800/80 bg-[#131e2b] text-slate-300 hover:border-slate-700'
+                      }"
+                    >
+                      <i class="fa-solid ${sit.icon} ${isSel ? 'text-[#e5a93c]' : 'text-amber-500/80'}"></i>
+                      <span class="text-sm font-medium">${sit.name}</span>
+                    </button>
+                  `;
+                }).join('')}
+              </div>
+
+              ${state.situationId === 'custom' ? `
+                <input 
+                  type="text" 
+                  placeholder="Describe your custom scenario in English..."
+                  value="${state.customSituation}"
+                  oninput="state.customSituation = this.value"
+                  class="mt-4 w-full bg-[#131e2b] border border-amber-500/50 rounded-xl p-3 text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-amber-500 text-sm"
+                />
+              ` : ''}
+            </div>
+
+            <!-- 03 Difficulty & Duration -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-10">
+              <div>
+                <h2 class="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-4">
+                  03 — Difficulty
+                </h2>
+                <div class="flex gap-2">
+                  ${DIFFICULTIES.map(d => `
+                    <button 
+                      onclick="selectDifficulty('${d}')"
+                      class="flex-1 py-2.5 rounded-xl text-xs font-medium transition-all ${
+                        state.difficulty === d
+                          ? 'border border-[#e5a93c] bg-[#1a2636] text-[#e5a93c]'
+                          : 'bg-[#131e2b] text-slate-400 border border-slate-800 hover:text-slate-200'
+                      }"
+                    >
+                      ${d}
+                    </button>
+                  `).join('')}
+                </div>
+              </div>
+
+              <div>
+                <h2 class="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-4">
+                  04 — Duration (Minutes)
+                </h2>
+                <div class="flex gap-2">
+                  ${DURATIONS.map(dur => `
+                    <button 
+                      onclick="selectDuration(${dur})"
+                      class="flex-1 py-2.5 rounded-xl text-xs font-bold transition-all ${
+                        state.duration === dur
+                          ? 'border border-[#e5a93c] bg-[#1a2636] text-[#e5a93c]'
+                          : 'bg-[#131e2b] text-slate-400 border border-slate-800 hover:text-slate-200'
+                      }"
+                    >
+                      ${dur} min
+                    </button>
+                  `).join('')}
+                </div>
+              </div>
+            </div>
+
+            <!-- Start Button -->
+            <button 
+              onclick="startPractice()"
+              class="w-full py-4 bg-[#e5a93c] hover:bg-[#d4982b] text-slate-950 font-bold text-base rounded-xl transition-all shadow-lg shadow-amber-500/10 flex items-center justify-center gap-2"
+            >
+              <i class="fa-solid fa-microphone"></i>
+              Start Speaking Practice
+            </button>
+          </div>
+        `;
+      } else if (!state.isFinished) {
+        // PANTALLA 2: PRÁCTICA ORAL ACTIVA
+        const currentTopics = SITUATIONS_BY_LEVEL[state.level];
+        const sitObj = currentTopics.find(s => s.id === state.situationId);
+        const sitName = state.situationId === 'custom' ? (state.customSituation || 'Custom Scenario') : sitObj.name;
+
+        app.innerHTML = `
+          <div>
+            <div class="flex items-center justify-between border-b border-slate-800 pb-4 mb-6">
+              <div>
+                <span class="text-xs font-semibold text-amber-500 uppercase tracking-widest">${state.level} • ${state.difficulty}</span>
+                <h2 class="text-xl font-bold text-slate-100 capitalize">${sitName}</h2>
+              </div>
+
+              <div class="flex items-center gap-3">
+                <div class="flex items-center gap-2 bg-[#131e2b] px-3 py-1.5 rounded-lg border border-slate-800 font-mono text-amber-400 font-bold text-sm">
+                  <i class="fa-regular fa-clock"></i>
+                  ${formatTime(state.timeLeft)}
+                </div>
+                <button 
+                  onclick="finishPractice()"
+                  class="text-xs bg-red-500/20 hover:bg-red-500/30 text-red-400 border border-red-500/30 px-3 py-2 rounded-lg transition"
+                >
+                  End & Score
+                </button>
+              </div>
+            </div>
+
+            <!-- Messages Box -->
+            <div class="space-y-4 max-h-[320px] overflow-y-auto pr-2 mb-6" id="chatBox">
+              ${state.messages.map(m => `
+                <div class="p-4 rounded-xl max-w-[80%] ${
+                  m.sender === 'user' 
+                    ? 'ml-auto bg-amber-500/10 border border-amber-500/30 text-amber-200' 
+                    : 'bg-[#131e2b] border border-slate-800 text-slate-200'
+                }">
+                  <div class="text-[10px] uppercase font-bold text-slate-500 mb-1">
+                    ${m.sender === 'user' ? 'You (Speaking)' : 'AI Partner'}
+                  </div>
+                  <p class="text-sm leading-relaxed">${m.text}</p>
+                </div>
+              `).join('')}
+            </div>
+
+            <!-- Mic Control Panel -->
+            <div class="flex flex-col items-center justify-center p-6 bg-[#131e2b] rounded-2xl border border-slate-800">
+              <div class="text-xs text-slate-400 mb-4 h-4">
+                ${state.isListening ? '<span class="text-amber-400 animate-pulse">Listening to your English voice...</span>' : ''}
+                ${state.isSpeaking ? '<span class="text-blue-400 animate-pulse">AI is speaking in English...</span>' : ''}
+                ${!state.isListening && !state.isSpeaking ? '<span>Click the microphone and speak in English</span>' : ''}
+              </div>
+
+              ${state.transcript ? `
+                <div class="text-xs text-slate-300 mb-4 bg-slate-900/60 p-2 rounded italic">
+                  "${state.transcript}"
+                </div>
+              ` : ''}
+
+              <button 
+                onclick="toggleListening()"
+                class="w-20 h-20 rounded-full flex items-center justify-center transition-all ${
+                  state.isListening 
+                    ? 'bg-red-500/20 border-2 border-red-500 text-red-500 animate-ping' 
+                    : 'bg-[#e5a93c] hover:bg-[#d4982b] text-slate-950 shadow-lg shadow-amber-500/20'
+                }"
+              >
+                <i class="fa-solid ${state.isListening ? 'fa-stop' : 'fa-microphone'} text-2xl"></i>
+              </button>
+            </div>
+          </div>
+        `;
+
+        // Auto scroll chat
+        const chatBox = document.getElementById('chatBox');
+        if (chatBox) chatBox.scrollTop = chatBox.scrollHeight;
+
+      } else {
+        // PANTALLA 3: SCORE Y FEEDBACK
+        app.innerHTML = `
+          <div class="space-y-6">
+            <div class="text-center border-b border-slate-800 pb-6">
+              <span class="text-xs font-semibold text-amber-500 uppercase tracking-widest">Practice Completed</span>
+              <h2 class="text-3xl font-bold text-slate-100 mt-1 serif-title">Performance Report</h2>
+            </div>
+
+            <div class="flex flex-col sm:flex-row items-center justify-center gap-6 bg-[#131e2b] p-6 rounded-2xl border border-slate-800">
+              <div class="text-center">
+                <div class="text-5xl font-extrabold text-[#e5a93c] font-mono">
+                  ${state.feedback.score} <span class="text-xl text-slate-500">/10</span>
+                </div>
+                <p class="text-xs text-slate-400 mt-1 font-semibold uppercase">Overall Speaking Score</p>
+              </div>
+
+              <div class="h-12 w-px bg-slate-800 hidden sm:block"></div>
+
+              <div class="space-y-1 text-center sm:text-left text-xs text-slate-300">
+                <p><strong class="text-slate-100">Level Target:</strong> ${state.level} (${state.difficulty})</p>
+                <p><strong class="text-slate-100">Spoken Turns:</strong> ${state.feedback.userTurns} responses</p>
+                <p><strong class="text-slate-100">Session Duration:</strong> ${state.duration} minutes</p>
+              </div>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div class="bg-[#131e2b] p-4 rounded-xl border border-slate-800">
+                <div class="flex items-center gap-2 text-amber-400 font-semibold text-sm mb-2">
+                  <i class="fa-solid fa-bolt"></i> Fluency & Engagement
+                </div>
+                <p class="text-xs text-slate-300 leading-relaxed">${state.feedback.fluency}</p>
+              </div>
+
+              <div class="bg-[#131e2b] p-4 rounded-xl border border-slate-800">
+                <div class="flex items-center gap-2 text-emerald-400 font-semibold text-sm mb-2">
+                  <i class="fa-solid fa-circle-check"></i> Grammar & Vocabulary
+                </div>
+                <p class="text-xs text-slate-300 leading-relaxed">${state.feedback.grammar}</p>
+              </div>
+            </div>
+
+            <div class="bg-[#131e2b] p-4 rounded-xl border border-slate-800">
+              <div class="flex items-center gap-2 text-blue-400 font-semibold text-sm mb-2">
+                <i class="fa-solid fa-lightbulb"></i> Recommendation
+              </div>
+              <p class="text-xs text-slate-300 leading-relaxed">${state.feedback.recommendation}</p>
+            </div>
+
+            <button 
+              onclick="restartApp()"
+              class="w-full py-4 bg-[#e5a93c] hover:bg-[#d4982b] text-slate-950 font-bold text-sm rounded-xl transition-all shadow-lg shadow-amber-500/10 flex items-center justify-center gap-2"
+            >
+              <i class="fa-solid fa-rotate-right"></i> Start New Role-Play Session
+            </button>
+          </div>
+        `;
+      }
+    }
+
+    // Funciones Auxiliares de Interfaz
+    function changeLevel(lvl) {
+      state.level = lvl;
+      state.situationId = SITUATIONS_BY_LEVEL[lvl][0].id;
+      render();
+    }
+
+    function selectSituation(id) {
+      state.situationId = id;
+      render();
+    }
+
+    function selectDifficulty(diff) {
+      state.difficulty = diff;
+      render();
+    }
+
+    function selectDuration(dur) {
+      state.duration = dur;
+      render();
+    }
+
+    function restartApp() {
+      state.isStarted = false;
+      state.isFinished = false;
+      render();
+    }
+
+    // Inicializar Render
+    render();
+  </script>
+</body>
+</html>
